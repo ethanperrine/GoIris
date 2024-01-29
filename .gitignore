@@ -3,6 +3,8 @@ Output/
 GoIris.db
 GoIris.db-shm
 GoIris.db-wal
-GoIris.exe
+*.exe
+
+GoIris-linux
 
 .vscode/
