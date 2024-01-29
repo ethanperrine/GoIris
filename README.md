@@ -7,7 +7,7 @@
 * SHA512
 * Potentially more in the future!
 
-# TODO:
+## TODO:
 * Implement TUI || GUI for improved user experience
 * Implement a config system to choose what hash types users want.
 * Possibly different types of local storage options? e.g., LevelDB, UnQLite, extremeDB, etc... 
