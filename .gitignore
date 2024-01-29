@@ -1,0 +1,8 @@
+Output/
+
+GoIris.db
+GoIris.db-shm
+GoIris.db-wal
+GoIris.exe
+
+.vscode/
