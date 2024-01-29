@@ -1,5 +1,5 @@
 # GoIris 
-## is an open-source project for local password recovery supporting the following hash types 
+## An open-source portable project for local password recovery supporting the following hash types 
 * MD4
 * MD5
 * SHA1
