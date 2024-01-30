@@ -5,6 +5,7 @@ import (
 	"GoIris/Models/Database"
 	"GoIris/Models/Hashes"
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -22,15 +23,23 @@ func main() {
 	Models.SetupSignalHandler()
 	Models.ClearConsole()
 	reader := bufio.NewReader(os.Stdin)
+
 	for {
 		fmt.Printf("\033]0;%s\007", "GoIris ~ GoLang Rainbow Table")
 		choice := promptUser(reader)
 		switch choice {
 		case "1":
+			ctx, cancel := context.WithCancel(context.Background())
 			Models.ClearConsole()
 			Database.SetPragmasForInsert(Models.DB)
-			go Models.UpdateInsertConsoleTitle()
-			insertFile()
+			go Models.UpdateInsertConsoleTitle(ctx)
+
+			err := insertFile()
+			if err != nil {
+				fmt.Println("Error opening file dialog:", err)
+			}
+
+			cancel()
 		case "2":
 			Models.ClearConsole()
 			Database.SetPragmasForRead(Models.DB)
@@ -45,6 +54,7 @@ func main() {
 		}
 	}
 }
+
 func promptUser(reader *bufio.Reader) string {
 	fmt.Println("What would you like to do?")
 	fmt.Println("1. Insert a file")
@@ -70,6 +80,30 @@ func insertFile() error {
 		return err
 	}
 	defer file.Close()
+
+	freeSpace := int64(Models.CheckDiskSpace())
+	md4size, md5Size, sha1Size, sha256Size, sha512Size := Models.CalculateFileHashSizes(file)
+	totalSize := int64(md4size + md5Size + sha1Size + sha256Size + sha512Size)
+
+	if freeSpace < totalSize {
+		fmt.Println("Warning: Not enough free space to insert file.")
+		fmt.Println("Continuing may cause database corruption due to running out of space.")
+		fmt.Print("Do you want to continue? (yes/no): ")
+
+		reader := bufio.NewReader(os.Stdin)
+		response, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Println("Error reading input:", err)
+			return err
+		}
+		response = strings.TrimSpace(response)
+
+		if strings.ToLower(response) != "yes" || strings.ToLower(response) != "y" {
+			fmt.Println("Operation aborted.")
+			return err
+		}
+	}
+	fmt.Println("Minimum Size Of DB:", Models.ConvertBytesToPretty(totalSize))
 
 	Database.StartTime = time.Now()
 
@@ -110,6 +144,11 @@ func insertFile() error {
 	return nil
 }
 
+type ItemHashPair struct {
+	Item string
+	Hash string
+}
+
 func dehashFile() error {
 	filePath, err := dialog.File().Load()
 	if err != nil {
@@ -126,19 +165,27 @@ func dehashFile() error {
 
 	scanner := bufio.NewScanner(file)
 	batchSize := 512
-	var batch []string
+	var batch []ItemHashPair
 
-	outputDir := "Output"
+	outputDir := fmt.Sprintf("Output/%s", time.Now().Format("[2006-01-02]"))
 	os.MkdirAll(outputDir, os.ModePerm)
-	outputFile := fmt.Sprintf("%s/File%s.txt", outputDir, time.Now().Format("20060102"))
-	outFile, err := os.Create(outputFile)
+	crackedFile := fmt.Sprintf("%s/Cracked.txt", outputDir)
+	nonCrackedFile := fmt.Sprintf("%s/NonCracked.txt", outputDir)
+
+	crackedOutFile, err := os.Create(crackedFile)
 	if err != nil {
-		fmt.Println("Error creating output file:", err)
+		fmt.Println("Error creating cracked output file:", err)
 		return err
 	}
-	defer outFile.Close()
+	defer crackedOutFile.Close()
 
-	item := ""
+	nonCrackedOutFile, err := os.Create(nonCrackedFile)
+	if err != nil {
+		fmt.Println("Error creating non-cracked output file:", err)
+		return err
+	}
+	defer nonCrackedOutFile.Close()
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		parts := strings.SplitN(line, ":", 2)
@@ -146,33 +193,50 @@ func dehashFile() error {
 			fmt.Println("Invalid line format:", line)
 			continue
 		}
-		item, hash := parts[0], parts[1]
-
-		batch = append(batch, hash)
+		batch = append(batch, ItemHashPair{Item: parts[0], Hash: parts[1]})
 		if len(batch) >= batchSize {
-			dehashedResults, err := Database.BatchLookup(Models.DB, batch)
+			var hashBatch []string
+			for _, pair := range batch {
+				hashBatch = append(hashBatch, pair.Hash)
+			}
+
+			dehashedResults, err := Database.BatchLookup(Models.DB, hashBatch)
 			if err != nil {
 				fmt.Println("Error dehashing batch:", err)
 				return err
 			}
 
-			for _, h := range batch {
-				plaintext := dehashedResults[h]
-				fmt.Fprintf(outFile, "%s:%s: %s\n", item, h, plaintext)
+			for _, pair := range batch {
+				plaintext := dehashedResults[pair.Hash]
+				if plaintext != "" {
+					fmt.Fprintf(crackedOutFile, "%s:%s:%s\n", pair.Item, pair.Hash, plaintext)
+				} else {
+					fmt.Fprintf(nonCrackedOutFile, "%s:%s\n", pair.Item, pair.Hash)
+				}
 			}
-			batch = []string{}
+			batch = []ItemHashPair{}
 		}
 	}
 
 	if len(batch) > 0 {
-		dehashedResults, err := Database.BatchLookup(Models.DB, batch)
+		var hashBatch []string
+		for _, pair := range batch {
+			hashBatch = append(hashBatch, pair.Hash)
+		}
+
+		dehashedResults, err := Database.BatchLookup(Models.DB, hashBatch)
 		if err != nil {
 			fmt.Println("Error dehashing final batch:", err)
 			return err
 		}
-		for _, h := range batch {
-			plaintext := dehashedResults[h]
-			fmt.Fprintf(outFile, "%s:%s: %s\n", item, h, plaintext)
+
+		for _, pair := range batch {
+			plaintext := dehashedResults[pair.Hash]
+			if plaintext != "" {
+				fmt.Fprintf(crackedOutFile, "%s:%s:%s\n", pair.Item, pair.Hash, plaintext)
+			} else {
+				fmt.Fprintf(nonCrackedOutFile, "%s:%s\n", pair.Item, pair.Hash)
+			}
 		}
 	}
 
@@ -180,8 +244,6 @@ func dehashFile() error {
 		fmt.Println("Error reading file:", err)
 		return err
 	}
-
-	fmt.Println("Dehashing completed. Results saved to", outputFile)
 	return nil
 }
 

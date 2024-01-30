@@ -34,3 +34,9 @@ require (
 	github.com/TheTitanrain/w32 v0.0.0-20180517000239-4f5cfb03fabf // indirect
 	golang.org/x/text v0.14.0
 )
+
+require (
+	github.com/go-ole/go-ole v1.2.6 // indirect
+	github.com/shirou/gopsutil v3.21.11+incompatible // indirect
+	github.com/yusufpapurcu/wmi v1.2.4 // indirect
+)
